@@ -1,125 +1,245 @@
 #!/usr/bin/env bash
 
-set -e
+set -euo pipefail
 
-echo "=========================================="
-echo " macOS-style Linux Mint Cinnamon Setup"
-echo " Linux Mint 22.3 Zena"
-echo "=========================================="
+# ============================================================
+# macOS-style Linux Mint Cinnamon Setup
+# Tested conceptually for Linux Mint 22.x / Cinnamon
+#
+# Components:
+#   - WhiteSur GTK theme
+#   - WhiteSur Cinnamon theme files
+#   - WhiteSur icons
+#   - Plank dock
+#   - Inter font
+#
+# IMPORTANT:
+#   Cinnamon desktop theme remains Mint-Y.
+#   This avoids the black/broken Cinnamon menu issue.
+# ============================================================
 
-if [[ "$XDG_CURRENT_DESKTOP" != *"X-Cinnamon"* && "$XDG_CURRENT_DESKTOP" != *"Cinnamon"* ]]; then
-    echo "WARNING: This script is designed for Cinnamon."
-    echo "Detected desktop: ${XDG_CURRENT_DESKTOP:-unknown}"
-    read -rp "Continue anyway? [y/N]: " answer
-    [[ "$answer" =~ ^[Yy]$ ]] || exit 1
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+BACKUP_DIR="$HOME/.macos-mint-backup"
+
+GTK_REPO="https://github.com/vinceliuice/WhiteSur-gtk-theme.git"
+ICON_REPO="https://github.com/vinceliuice/WhiteSur-icon-theme.git"
+
+GTK_DIR="$HOME/.macos-mint-WhiteSur-gtk"
+ICON_DIR="$HOME/.macos-mint-WhiteSur-icons"
+
+echo
+echo "============================================================"
+echo " macOS-style Linux Mint Cinnamon Installer"
+echo "============================================================"
+echo
+
+# ------------------------------------------------------------
+# Check Cinnamon
+# ------------------------------------------------------------
+
+if ! command -v cinnamon-session >/dev/null 2>&1; then
+    echo "ERROR: Cinnamon does not appear to be installed."
+    echo
+    exit 1
 fi
 
-echo
-echo "[1/8] Updating package information..."
-sudo apt update
+# ------------------------------------------------------------
+# Backup existing settings
+# ------------------------------------------------------------
+
+echo "[1/10] Creating backup..."
+
+mkdir -p "$BACKUP_DIR"
+
+gsettings get org.cinnamon.theme name \
+    > "$BACKUP_DIR/cinnamon-theme.txt" 2>/dev/null || true
+
+gsettings get org.cinnamon.desktop.interface gtk-theme \
+    > "$BACKUP_DIR/gtk-theme.txt" 2>/dev/null || true
+
+gsettings get org.cinnamon.desktop.interface icon-theme \
+    > "$BACKUP_DIR/icon-theme.txt" 2>/dev/null || true
+
+gsettings get org.cinnamon.desktop.interface cursor-theme \
+    > "$BACKUP_DIR/cursor-theme.txt" 2>/dev/null || true
+
+gsettings get org.cinnamon.desktop.interface font-name \
+    > "$BACKUP_DIR/font-name.txt" 2>/dev/null || true
+
+gsettings get org.cinnamon.desktop.wm.preferences titlebar-font \
+    > "$BACKUP_DIR/titlebar-font.txt" 2>/dev/null || true
+
+gsettings get org.cinnamon.desktop.wm.preferences button-layout \
+    > "$BACKUP_DIR/button-layout.txt" 2>/dev/null || true
+
+echo "Backup saved to:"
+echo "$BACKUP_DIR"
+
+# ------------------------------------------------------------
+# Install dependencies
+# ------------------------------------------------------------
 
 echo
-echo "[2/8] Installing required packages..."
+echo "[2/10] Installing required packages..."
+
+sudo apt update
 
 sudo apt install -y \
     git \
-    curl \
-    wget \
-    unzip \
     plank \
     fonts-inter \
-    fonts-noto \
-    gnome-themes-extra \
-    gtk2-engines-murrine \
     sassc \
-    papirus-icon-theme
+    libglib2.0-dev-bin \
+    libxml2-utils
+
+# ------------------------------------------------------------
+# Stop Plank
+# ------------------------------------------------------------
 
 echo
-echo "[3/8] Creating theme directories..."
+echo "[3/10] Stopping Plank..."
 
-mkdir -p "$HOME/.themes"
-mkdir -p "$HOME/.icons"
-mkdir -p "$HOME/.local/share/themes"
-mkdir -p "$HOME/.local/share/icons"
+pkill plank 2>/dev/null || true
+
+# Remove the BAD launcher configuration created by
+# the previous script.
+#
+# This is intentional.
+# We do NOT create .dockitem files.
+# Applications should be added to Plank normally.
+# ------------------------------------------------------------
 
 echo
-echo "[4/8] Installing WhiteSur GTK theme..."
+echo "[4/10] Cleaning old Plank launcher configuration..."
 
-TMP_DIR="$(mktemp -d)"
+rm -rf "$HOME/.config/plank/dock1/launchers"
 
-git clone --depth=1 \
-    https://github.com/vinceliuice/WhiteSur-gtk-theme.git \
-    "$TMP_DIR/WhiteSur-gtk-theme"
+# ------------------------------------------------------------
+# Download WhiteSur GTK theme
+# ------------------------------------------------------------
 
-cd "$TMP_DIR/WhiteSur-gtk-theme"
+echo
+echo "[5/10] Downloading WhiteSur GTK theme..."
+
+rm -rf "$GTK_DIR"
+
+git clone \
+    --depth=1 \
+    "$GTK_REPO" \
+    "$GTK_DIR"
+
+cd "$GTK_DIR"
+
+# Install:
+#   light theme
+#   blue/default accent
+#
+# WhiteSur's installer installs the Cinnamon and Plank
+# theme components as part of the theme pack.
 
 ./install.sh \
-    -d "$HOME/.themes" \
     -c light \
     -t default
 
+# ------------------------------------------------------------
+# Download WhiteSur icons
+# ------------------------------------------------------------
+
 echo
-echo "[5/8] Installing WhiteSur icon theme..."
+echo "[6/10] Downloading WhiteSur icons..."
 
-cd "$TMP_DIR"
+rm -rf "$ICON_DIR"
 
-git clone --depth=1 \
-    https://github.com/vinceliuice/WhiteSur-icon-theme.git \
-    WhiteSur-icon-theme
+git clone \
+    --depth=1 \
+    "$ICON_REPO" \
+    "$ICON_DIR"
 
-cd WhiteSur-icon-theme
+cd "$ICON_DIR"
 
+# Install the normal WhiteSur icon theme.
+#
+# --alternative gives more macOS-like application icons.
 ./install.sh \
-    -d "$HOME/.icons"
+    -a
+
+# ------------------------------------------------------------
+# Configure Cinnamon
+# ------------------------------------------------------------
 
 echo
-echo "[6/8] Configuring Cinnamon appearance..."
+echo "[7/10] Configuring Cinnamon..."
 
-# GTK theme
-gsettings set org.cinnamon.desktop.interface gtk-theme "WhiteSur-Light"
+# IMPORTANT:
+#
+# Keep Cinnamon desktop theme as Mint-Y.
+#
+# DO NOT:
+#   gsettings set org.cinnamon.theme name "WhiteSur-Light"
+#
+# That can cause the Cinnamon menu/panel to render incorrectly.
+#
+gsettings set org.cinnamon.theme name "Mint-Y"
 
-# Cinnamon theme
-gsettings set org.cinnamon.theme name "WhiteSur-Light"
+# GTK applications use WhiteSur.
+gsettings set \
+    org.cinnamon.desktop.interface \
+    gtk-theme \
+    "WhiteSur-Light"
 
-# Icon theme
-gsettings set org.cinnamon.desktop.interface icon-theme "WhiteSur"
+# WhiteSur icons.
+#
+# Depending on the exact icon installer version,
+# WhiteSur may be installed under:
+#   WhiteSur
+#
+gsettings set \
+    org.cinnamon.desktop.interface \
+    icon-theme \
+    "WhiteSur"
 
-# Cursor
-gsettings set org.cinnamon.desktop.interface cursor-theme "Adwaita"
+# Keep standard cursor.
+gsettings set \
+    org.cinnamon.desktop.interface \
+    cursor-theme \
+    "Adwaita"
 
-# Font
-gsettings set org.cinnamon.desktop.interface font-name "Inter 10"
+# macOS-like font.
+gsettings set \
+    org.cinnamon.desktop.interface \
+    font-name \
+    "Inter 10"
 
-# Window title font
-gsettings set org.cinnamon.desktop.wm.preferences titlebar-font "Inter Bold 10"
+gsettings set \
+    org.cinnamon.desktop.wm.preferences \
+    titlebar-font \
+    "Inter Bold 10"
+
+# ------------------------------------------------------------
+# macOS-style window buttons
+# ------------------------------------------------------------
 
 echo
-echo "[7/8] Configuring Plank dock..."
+echo "[8/10] Configuring macOS-style window buttons..."
 
-mkdir -p "$HOME/.config/plank/dock1/launchers"
+# macOS normally has:
+#
+#   Close / Minimize / Maximize
+#
+# on the LEFT side of the title bar.
 
-cat > "$HOME/.config/plank/dock1/launchers/files.dockitem" <<'EOF'
-[PlankItemsDockItem]
-Launcher=file-manager.desktop
-EOF
+gsettings set \
+    org.cinnamon.desktop.wm.preferences \
+    button-layout \
+    "close,minimize,maximize:"
 
-cat > "$HOME/.config/plank/dock1/launchers/terminal.dockitem" <<'EOF'
-[PlankItemsDockItem]
-Launcher=org.gnome.Terminal.desktop
-EOF
-
-cat > "$HOME/.config/plank/dock1/launchers/firefox.dockitem" <<'EOF'
-[PlankItemsDockItem]
-Launcher=firefox.desktop
-EOF
-
-cat > "$HOME/.config/plank/dock1/launchers/chrome.dockitem" <<'EOF'
-[PlankItemsDockItem]
-Launcher=google-chrome.desktop
-EOF
+# ------------------------------------------------------------
+# Configure Plank
+# ------------------------------------------------------------
 
 echo
-echo "[8/8] Creating startup entry for Plank..."
+echo "[9/10] Configuring Plank..."
 
 mkdir -p "$HOME/.config/autostart"
 
@@ -135,25 +255,58 @@ StartupNotify=false
 X-GNOME-Autostart-enabled=true
 EOF
 
-echo
-echo "=========================================="
-echo " Setup completed!"
-echo "=========================================="
+# ------------------------------------------------------------
+# Start Plank
+# ------------------------------------------------------------
 
 echo
-echo "Starting Plank..."
+echo "[10/10] Starting Plank..."
 
 pkill plank 2>/dev/null || true
+
 nohup plank >/dev/null 2>&1 &
 
+# ------------------------------------------------------------
+# Finished
+# ------------------------------------------------------------
+
+echo
+echo "============================================================"
+echo " Installation completed"
+echo "============================================================"
+echo
+echo "Theme configuration:"
+echo
+echo "  Applications : WhiteSur-Light"
+echo "  Icons        : WhiteSur"
+echo "  Desktop      : Mint-Y"
+echo "  Cursor       : Adwaita"
+echo "  Font         : Inter"
+echo "  Dock         : Plank"
+echo
+echo "============================================================"
 echo
 echo "IMPORTANT:"
-echo "Log out and log back in for all Cinnamon theme changes."
 echo
-echo "After logging in:"
-echo "  - Move Cinnamon panel to the TOP"
-echo "  - Set panel height around 28-32 px"
-echo "  - Hide the bottom panel if you have one"
-echo "  - Plank will act as your macOS-style dock"
+echo "1. Log out and log back in."
 echo
-echo "Done."
+echo "2. Plank will start automatically."
+echo
+echo "3. Do NOT manually create .dockitem files."
+echo
+echo "4. To add applications to Plank:"
+echo "      Start the application"
+echo "      Right-click its Plank icon"
+echo "      Select 'Keep in Dock'"
+echo
+echo "5. Open Plank Preferences to adjust:"
+echo "      Position : Bottom"
+echo "      Icon Size: 48-56"
+echo "      Zoom     : ON"
+echo
+echo "Backup:"
+echo "  $BACKUP_DIR"
+echo
+echo "To uninstall:"
+echo "  ./macos-mint-uninstall.sh"
+echo
